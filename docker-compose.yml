@@ -1,6 +1,6 @@
 services:
   backend:
-    image: ${DOCKER_USERNAME}/handleliste-backend:latest
+    image: evenve/handleliste-backend:latest
     restart: unless-stopped
     volumes:
       - db-data:/data
@@ -8,7 +8,7 @@ services:
       - internal
 
   frontend:
-    image: ${DOCKER_USERNAME}/handleliste-frontend:latest
+    image: evenve/handleliste-frontend:latest
     restart: unless-stopped
     depends_on:
       - backend
