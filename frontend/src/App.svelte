@@ -28,6 +28,7 @@
     try {
       const res = await fetch('/api/items');
       items = await res.json();
+      connected = true;
     } catch (e) {
       console.error('Klarte ikke å laste varer', e);
     }
@@ -39,6 +40,7 @@
     eventSource.onopen = () => { connected = true; };
 
     eventSource.onmessage = (e) => {
+      connected = true;
       const event = JSON.parse(e.data);
       if (event.type === 'add') {
         items = [...items, event.item];
