@@ -37,7 +37,12 @@
   function connectSSE() {
     eventSource = new EventSource('/api/stream');
 
-    eventSource.onopen = () => { connected = true; };
+    eventSource.onopen = () => {
+      connected = true;
+      // Hent full tilstand på nytt ved hver (gjen)oppkobling, slik at events
+      // som ble sendt mens strømmen var nede ikke blir tapt for klienten.
+      loadItems();
+    };
 
     eventSource.onmessage = (e) => {
       connected = true;
@@ -76,7 +81,25 @@
   }
 
   async function toggleItem(id) {
-    await fetch(`/api/items/${id}`, { method: 'PATCH' });
+    // Optimistisk oppdatering: flytt varen med en gang slik at UI reagerer
+    // umiddelbart, selv om SSE-eventet skulle bli forsinket eller tapt.
+    // SSE-eventet setter senere varen til serverens verdi (idempotent).
+    items = items.map(i => i.id === id ? { ...i, checked: !i.checked } : i);
+    try {
+      const res = await fetch(`/api/items/${id}`, { method: 'PATCH' });
+      if (res.status === 404) {
+        // Varen ble slettet av noen andre samtidig — fjern spøkelsesvaren lokalt.
+        // (fetch kaster ikke på 404, så dette må sjekkes eksplisitt.)
+        items = items.filter(i => i.id !== id);
+      } else if (!res.ok) {
+        // Annen feil — rull tilbake den optimistiske endringen.
+        items = items.map(i => i.id === id ? { ...i, checked: !i.checked } : i);
+      }
+    } catch (e) {
+      // Nettverksfeil — rull tilbake.
+      items = items.map(i => i.id === id ? { ...i, checked: !i.checked } : i);
+      console.error('Klarte ikke å oppdatere vare', e);
+    }
   }
 
   async function deleteItem(id) {
