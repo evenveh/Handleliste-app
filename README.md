@@ -1,10 +1,11 @@
 # 🛒 Handleliste
 
-En enkel, delt handleliste for familien. Alle i husstanden ser samme liste, og endringer dukker opp hos alle i sanntid — uten å oppdatere siden. Bygget som en liten containerisert webapp og eksponert utenfor hjemmenettet via Cloudflare Tunnel.
+En enkel, delt handleliste for familien — og for flere husstander i samme app. Alle i en husstand ser samme liste, og endringer dukker opp hos alle i sanntid — uten å oppdatere siden. Bygget som en liten containerisert webapp og eksponert utenfor hjemmenettet via Cloudflare Tunnel.
 
 ## Funksjoner
 
-- **Delt liste** — alle ser og redigerer samme handleliste.
+- **Flere husstander** — hver husstand har sin egen liste og en hemmelig invitasjonskode (f.eks. `K7QM-3XTP`). Del koden eller en invitasjonslenke (`/?join=KODE`) for å la andre bli med. Én enhet kan være med i flere husstander og bytte mellom dem.
+- **Delt liste** — alle i husstanden ser og redigerer samme handleliste.
 - **Sanntid** — varer som legges til, krysses av eller slettes oppdateres live hos alle via Server-Sent Events (SSE).
 - **Kryss av uten å slette** — avkryssede varer flyttes til en «Kjøpt»-seksjon, og kan fjernes samlet.
 - **Hvem la til varen** — hvert navn lagres lokalt i nettleseren første gang du åpner appen.
@@ -52,16 +53,21 @@ nginx serverer den ferdigbygde Svelte-appen og proxyer alle `/api/`-kall videre 
 
 Alle endepunkter ligger under `/api`.
 
-| Metode   | Endepunkt           | Beskrivelse                                  |
-| -------- | ------------------- | -------------------------------------------- |
-| `GET`    | `/api/items`        | Hent alle varer (sortert på opprettet)       |
-| `POST`   | `/api/items`        | Legg til vare — `{ "name", "added_by" }`     |
-| `PATCH`  | `/api/items/{id}`   | Veksle avkryssing av en vare                 |
-| `DELETE` | `/api/items/{id}`   | Slett én vare                                |
-| `DELETE` | `/api/items`        | Slett alle avkryssede varer                  |
-| `GET`    | `/api/stream`       | SSE-strøm med live-hendelser                 |
+Alle endepunkter for varer er knyttet til en husstand via koden i stien. Koden er det eneste som gir tilgang, så den bør behandles som et passord. Små bokstaver og manglende bindestrek godtas.
 
-SSE-hendelser har formen `{ "type": "add" | "update" | "delete" | "delete_checked", ... }`.
+| Metode   | Endepunkt                              | Beskrivelse                                  |
+| -------- | -------------------------------------- | -------------------------------------------- |
+| `POST`   | `/api/households`                      | Opprett husstand — `{ "name" }` → `{ "name", "code" }` |
+| `GET`    | `/api/households/{code}`               | Hent husstand (brukes for å bli med)         |
+| `PATCH`  | `/api/households/{code}`               | Endre navn — `{ "name" }`                    |
+| `GET`    | `/api/households/{code}/items`         | Hent alle varer (sortert på opprettet)       |
+| `POST`   | `/api/households/{code}/items`         | Legg til vare — `{ "name", "added_by" }`     |
+| `PATCH`  | `/api/households/{code}/items/{id}`    | Veksle avkryssing av en vare                 |
+| `DELETE` | `/api/households/{code}/items/{id}`    | Slett én vare                                |
+| `DELETE` | `/api/households/{code}/items`         | Slett alle avkryssede varer                  |
+| `GET`    | `/api/households/{code}/stream`        | SSE-strøm med live-hendelser for husstanden  |
+
+SSE-hendelser har formen `{ "type": "add" | "update" | "delete" | "delete_checked" | "household", ... }` og sendes bare til klienter i samme husstand.
 
 ## Oppsett og kjøring
 
@@ -104,17 +110,43 @@ Vite-serveren kjører på [http://localhost:5173](http://localhost:5173). Merk a
 
 ## Datamodell
 
-Én tabell, `items`:
+`households`:
 
-| Felt         | Type      | Beskrivelse                       |
-| ------------ | --------- | --------------------------------- |
-| `id`         | integer   | Primærnøkkel                      |
-| `name`       | string    | Navn på varen                     |
-| `added_by`   | string    | Hvem som la den til               |
-| `checked`    | boolean   | Om varen er krysset av            |
-| `created_at` | datetime  | Tidspunkt varen ble lagt til (UTC)|
+| Felt         | Type      | Beskrivelse                                   |
+| ------------ | --------- | --------------------------------------------- |
+| `id`         | integer   | Primærnøkkel                                  |
+| `name`       | string    | Navn på husstanden                            |
+| `code`       | string    | Unik invitasjonskode (8 tegn, lagret uten `-`) |
+| `created_at` | datetime  | Tidspunkt husstanden ble opprettet (UTC)      |
+
+`items`:
+
+| Felt           | Type      | Beskrivelse                       |
+| -------------- | --------- | --------------------------------- |
+| `id`           | integer   | Primærnøkkel                      |
+| `household_id` | integer   | Husstanden varen tilhører         |
+| `name`         | string    | Navn på varen                     |
+| `added_by`     | string    | Hvem som la den til               |
+| `checked`      | boolean   | Om varen er krysset av            |
+| `created_at`   | datetime  | Tidspunkt varen ble lagt til (UTC)|
 
 Databasen ligger på Docker-volumet `db-data` (`/data/handleliste.db`) og overlever omstart av containere.
+
+### Oppgradering fra versjonen uten husstander
+
+Ved første oppstart migreres databasen automatisk: `items` får kolonnen `household_id`, og alle eksisterende varer flyttes til en ny husstand kalt «Vår husstand». Koden skrives til loggen:
+
+```bash
+docker compose logs backend | grep migrering
+```
+
+Finner du ikke loggen lenger, kan du hente koden direkte fra databasen:
+
+```bash
+docker compose exec backend python -c "import sqlite3; print(sqlite3.connect('/data/handleliste.db').execute('select name, code from households').fetchall())"
+```
+
+Skriv inn koden i appen (eller åpn `/?join=KODE`) på hver enhet, så ser dere den gamle lista igjen. Navnet kan endres i appen.
 
 ## CI/CD
 
@@ -125,7 +157,7 @@ Databasen ligger på Docker-volumet `db-data` (`/data/handleliste.db`) og overle
 ```
 .
 ├── backend/
-│   ├── main.py            # FastAPI: CRUD + SSE-kringkasting
+│   ├── main.py            # FastAPI: husstander, CRUD, SSE og migrering
 │   ├── requirements.txt
 │   └── Dockerfile
 ├── frontend/
