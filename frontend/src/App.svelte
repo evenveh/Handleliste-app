@@ -257,7 +257,6 @@
       }
       if (!res.ok) return;
       items = await res.json();
-      connected = true;
     } catch (e) {
       console.error('Klarte ikke å laste varer', e);
     }
@@ -275,6 +274,9 @@
     disconnectSSE();
     const code = activeCode;
     if (!code) return;
+
+    // Vis lista med en gang, uavhengig av når sanntidsstrømmen kommer opp.
+    loadItems();
 
     const es = new EventSource(api(code, '/stream'));
     eventSource = es;

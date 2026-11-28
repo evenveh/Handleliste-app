@@ -285,10 +285,14 @@ async def stream(code: str, request: Request):
     subscribers[household_id].append(queue)
 
     async def event_generator():
+        # Send noen bytes med en gang. Uten dette holder proxyer (Cloudflare)
+        # igjen svaret til første hendelse eller keepalive, og nettleseren
+        # tror da at den fortsatt kobler til. `retry` styrer gjenoppkobling.
+        yield "retry: 3000\n: connected\n\n"
         try:
             while True:
                 try:
-                    event = await asyncio.wait_for(queue.get(), timeout=30)
+                    event = await asyncio.wait_for(queue.get(), timeout=15)
                     yield f"data: {json.dumps(event)}\n\n"
                 except asyncio.TimeoutError:
                     yield ": keepalive\n\n"
